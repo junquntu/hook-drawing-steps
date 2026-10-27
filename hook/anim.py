@@ -144,11 +144,12 @@ def build(outdir, do_gif=True):
         items = items_for(i)
         skip = set(id(e) for e in items)
         base = make_base(i, skip)
+        base_img = base.img
         seq = frames_for(i, items)
         events.append(('tick', clock, 0.12))
         for idx, t in seq:
             cv = base
-            cv.img = base.img.copy()
+            cv.img = base_img.copy()
             cv.d = ImageDraw.Draw(cv.img)
             if 0 <= idx < len(items):
                 e = items[idx]
@@ -160,7 +161,7 @@ def build(outdir, do_gif=True):
                     draw_line_sweep(cv, e, t, col, lw)
             out = cv.img.resize(SIZE, Image.LANCZOS)
             vw.stdin.write(out.convert('RGB').tobytes())
-            if do_gif and total % 6 == 0:
+            if do_gif and total % 8 == 0:
                 gif_frames.append(out.convert('RGB').resize((720, 512)))
             total += 1
             clock += 1.0/FPS
@@ -169,7 +170,7 @@ def build(outdir, do_gif=True):
         events.append(('scratch', clock-dur_sweep, max(0.2, dur_sweep*0.9)))
     events.append(('ding', clock-0.2, 0.9))
     for _ in range(int(FPS*1.2)):
-        vw.stdin.write(base.img.resize(SIZE, Image.LANCZOS).convert('RGB').tobytes())
+        vw.stdin.write(base_img.resize(SIZE, Image.LANCZOS).convert('RGB').tobytes())
         total += 1
     vw.stdin.close(); vw.wait()
     wav = os.path.join(outdir, '_audio.wav')
@@ -181,5 +182,5 @@ def build(outdir, do_gif=True):
     os.remove(tmp); os.remove(wav)
     if do_gif and gif_frames:
         gif_frames[0].save(os.path.join(outdir, 'hook-steps.gif'), save_all=True,
-                           append_images=gif_frames[1:], duration=100, loop=0, optimize=True)
+                           append_images=gif_frames[1:], duration=133, loop=0, optimize=True)
     print('frames', total, 'dur %.1fs' % (total/FPS))
