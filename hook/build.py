@@ -42,7 +42,7 @@ def main(do_anim=True):
 
     if do_anim:
         import anim
-        anim.build(OUT, fps=14)
+        anim.build(OUT)
         print('animation ok')
 
 if __name__ == '__main__':
