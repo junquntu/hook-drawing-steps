@@ -216,34 +216,35 @@ def draw_panel(cv,i,meta):
 def visible(e, cur):
     st = e['step']
     if st > cur: return False
-    if cur >= 12:
-        if e['kind']=='DIM': return st == 11
+    if cur >= 10:
+        if e['kind']=='DIM': return st == 9
         if e['kind']=='P': return False
         if e['cat'] in ('known','mid','conn','aux'): return False
         return True
-    if cur == 11:
-        if e['kind']=='DIM': return st == 11
+    if cur == 9:
+        if e['kind']=='DIM': return st == 9
         if e['kind']=='P': return False
         return True
     return True
 
-def draw_elements(cv, cur, anim=None):
+def draw_elements(cv, cur, anim=None, skip=None):
     for e in E:
         if not visible(e, cur): continue
+        if skip and id(e) in skip: continue
         new = (e['step'] == cur)
         cat = e['cat']
-        if cat=='final' and cur>=12: new = True
+        if cat=='final' and cur>=10: new = True
         if cat in ('dim','ext'):
             if cat=='ext':
                 cv.polyline([e['p1'],e['p2']], muted((88,98,112)) if not new else ACC, LW['ext'])
                 continue
-            if cur>=12:
+            if cur>=10:
                 draw_dim(cv, e, (52,62,76), hl=False)
             else:
                 draw_dim(cv, e, ACC if new else muted((88,98,112)), hl=new)
             continue
         col = CAT[cat] if new else muted(CAT[cat])
-        if cur>=11 and cat=='axis': col = CAT['axis']
+        if cur>=10 and cat=='axis': col = CAT['axis']
         lw = LW[cat] * (1.25 if new else 1.0)
         if cat=='aux' and not new: lw = 0.7
         k=e['kind']
@@ -264,8 +265,8 @@ def draw_elements(cv, cur, anim=None):
             cv.arc(e['c'],e['r'],0,360, col, lw, DASH.get(cat))
         elif k=='P':
             if e['ptype']=='tan':
-                cv.ring(e['p'], 1.5, ACC if (new or cur>=11) else muted(ACC), 1.0)
-                if new or cur>=11:
+                cv.ring(e['p'], 1.5, ACC if (new or cur>=10) else muted(ACC), 1.0)
+                if new or cur>=10:
                     cv.dot(e['p'],0.55,ACC)
             else:
                 p=e['p']

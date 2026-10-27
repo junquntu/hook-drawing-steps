@@ -1,59 +1,125 @@
 # -*- coding: utf-8 -*-
-"""逐步骤动画：新圆弧由圆规"划"出来"""
-import os, sys, math, subprocess, shutil
+"""60fps 动画：用"半径尺寸线"旋转划出圆弧，逐步骤推进，带音效"""
+import os, sys, math, subprocess, shutil, wave
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import render
 from render import (Canvas, W, H, OX, OY, SC, draw_sheet, draw_header,
-                    draw_elements, draw_panel, draw_dim, visible, STEPS, ACC, INK)
+                    draw_elements, draw_panel, visible, STEPS, ACC, INK)
 from draw import F, FONT_SANS, mix
 from elements import E, CAT, LW, DASH
+import numpy as np
+from PIL import Image, ImageDraw
 
-COMPASS = (92, 110, 138)
+SIZE = (1800, 1280)
+SS = 2
+FPS = 60
+SWEEP_COL = (206, 92, 58)
+RADIUS_COL = (168, 96, 70)
 
-def draw_compass(cv, c, r, ang, col=COMPASS):
-    th = math.radians(ang)
-    pencil = (c[0]+r*math.cos(th), c[1]+r*math.sin(th))
-    L = min(58.0, max(26.0, r*0.92))
-    half = r/2.0
-    if half > L*0.94: half = L*0.94
-    h = math.sqrt(max(L*L-half*half, 1.0))
-    mx, my = (c[0]+pencil[0])/2, (c[1]+pencil[1])/2
-    ux, uy = (pencil[0]-c[0])/r, (pencil[1]-c[1])/r
-    nx, ny = -uy, ux
-    if ny < 0: nx, ny = -nx, -ny
-    hinge = (mx+nx*h, my+ny*h)
-    w = 0.75
-    cv.polyline([hinge, c], col, w)
-    cv.polyline([hinge, pencil], col, w)
-    # 铰链
-    cv.ring(hinge, 1.5, col, 0.8)
-    cv.dot(hinge, 0.6, col)
-    # 针尖
-    a = math.degrees(math.atan2(c[1]-hinge[1], c[0]-hinge[0]))
-    tip = (c[0]+1.9*math.cos(math.radians(a)), c[1]+1.9*math.sin(math.radians(a)))
-    side = 0.85
-    p1 = (c[0]+side*math.cos(math.radians(a+90)), c[1]+side*math.sin(math.radians(a+90)))
-    p2 = (c[0]+side*math.cos(math.radians(a-90)), c[1]+side*math.sin(math.radians(a-90)))
+def ease(t):
+    return t*t*(3-2*t)
+
+def _arrow(cv, tip, ang, col, size=2.4):
+    a = math.radians(ang)
+    L, Wd = size, size*0.34
+    bx, by = tip[0]-L*math.cos(a), tip[1]-L*math.sin(a)
+    p1 = (bx + Wd*math.sin(a), by - Wd*math.cos(a))
+    p2 = (bx - Wd*math.sin(a), by + Wd*math.cos(a))
     cv.d.polygon([cv.P(tip), cv.P(p1), cv.P(p2)], fill=col)
-    # 笔尖
-    cv.dot(pencil, 0.55, col)
 
-def frame(i, arc_ids, idx, t, path, size=(W, H), ss=2):
+def draw_sweep(cv, e, t, col, lw):
+    a0, a1 = e['a0'], e['a1']
+    a = a0 + (a1-a0)*t
+    cv.arc(e['c'], e['r'], a0, a, col, lw)
+    tip = cv.arc_pt(e['c'], e['r'], a)
+    # 半径尺寸线
+    cv.polyline([e['c'], tip], RADIUS_COL, 0.45, [4.5,2.2])
+    cv.dot(e['c'], 0.55, RADIUS_COL)
+    _arrow(cv, tip, a, RADIUS_COL, 2.6)
+    cv.ring(tip, 1.1, (255,255,255), 0.9)
+
+def draw_line_sweep(cv, e, t, col, lw):
+    p1, p2 = e['p1'], e['p2']
+    q = (p1[0]+(p2[0]-p1[0])*t, p1[1]+(p2[1]-p1[1])*t)
+    cv.polyline([p1, q], col, lw)
+    cv.dot(q, 0.5, col)
+
+def _top(e):
+    if e['kind'] == 'L':
+        return max(e['p1'][1], e['p2'][1])
+    ys = []
+    for k in range(9):
+        a = math.radians(e['a0'] + (e['a1']-e['a0'])*k/8)
+        ys.append(e['c'][1] + e['r']*math.sin(a))
+    return max(ys)
+
+def _len(e):
+    if e['kind'] == 'L':
+        return math.hypot(e['p2'][0]-e['p1'][0], e['p2'][1]-e['p1'][1])
+    return abs(e['r']*math.radians(e['a1']-e['a0']))
+
+def items_for(step):
+    """该步骤要动画的元素（按顺序）"""
+    if step == 10:
+        els = [e for e in E if e['step'] == 10 and visible(e, 10)]
+        arcs = sorted([e for e in els if e['kind'] == 'A'], key=_top, reverse=True)
+        lins = sorted([e for e in els if e['kind'] == 'L'], key=_top, reverse=True)
+        return arcs + lins          # 先曲线后直线、先上后下
+    return [e for e in E if e['step'] == step and e['kind'] == 'A' and e['cat'] != 'aux']
+
+def make_base(i, skip_ids):
     meta = STEPS[i-1]
-    cv = Canvas(size[0], size[1], ss=ss); cv.set_mm(OX, OY, SC)
-    draw_sheet(cv, grid=(i > 2))
+    cv = Canvas(SIZE[0], SIZE[1], ss=SS); cv.set_mm(OX, OY, SC)
+    draw_sheet(cv, grid=(i > 1))
     draw_header(cv, i, meta)
-    anim = dict(step=i, ids=arc_ids, idx=idx, t=t)
-    draw_elements(cv, i, anim=anim)
+    draw_elements(cv, i, skip=skip_ids)
     draw_panel(cv, i, meta)
-    # 圆规
-    if 0 <= idx < len(arc_ids):
-        e = [x for x in E if id(x) == arc_ids[idx]][0]
-        ang = e['a0'] + (e['a1']-e['a0'])*t
-        draw_compass(cv, e['c'], e['r'], ang)
-    return cv.save(path)
+    return cv
 
-def build(outdir, fps=14, size=(1800, 1280), ss=2):
+def frames_for(i, items):
+    """返回 [(idx, t)] 序列"""
+    seq = [(-1, 0.0)]*10
+    for k, e in enumerate(items):
+        L = _len(e)
+        n = int(max(16, min(46, L*1.25)))
+        for s in range(n):
+            seq.append((k, ease((s+1)/n)))
+        seq.append((k, 1.0))
+        seq.append((k, 1.0))
+    seq += [(len(items)-1 if items else -1, 1.0)]*24
+    return seq
+
+def build_audio(events, total, path, sr=44100):
+    n = int(total*sr)
+    buf = np.zeros(n, dtype=np.float32)
+    rng = np.random.default_rng(7)
+    for kind, t0, dur in events:
+        i0 = int(t0*sr); i1 = min(n, int((t0+dur)*sr))
+        if i1 <= i0: continue
+        m = i1-i0
+        tt = np.arange(m)/sr
+        if kind == 'tick':
+            env = np.exp(-tt*38)
+            s = (np.sin(2*np.pi*1180*tt)*0.55 + rng.standard_normal(m)*0.35) * env
+            buf[i0:i1] += s*0.16
+        elif kind == 'scratch':
+            noise = rng.standard_normal(m)
+            lp = np.zeros(m); acc = 0.0
+            for k in range(m):
+                acc = 0.82*acc + 0.18*noise[k]; lp[k] = acc
+            env = np.minimum(1, tt/0.05) * np.minimum(1, (dur-tt)/0.08)
+            buf[i0:i1] += lp*env*0.10
+        elif kind == 'ding':
+            env = np.exp(-tt*5.0)
+            s = (np.sin(2*np.pi*659*tt)+0.5*np.sin(2*np.pi*988*tt))*env
+            buf[i0:i1] += s*0.12
+    buf = np.clip(buf, -0.98, 0.98)
+    pcm = (buf*32767).astype(np.int16)
+    with wave.open(path, 'wb') as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
+        w.writeframes(pcm.tobytes())
+
+def build(outdir, do_gif=True):
     os.makedirs(outdir, exist_ok=True)
     ff = shutil.which('ffmpeg')
     if not ff:
@@ -62,38 +128,58 @@ def build(outdir, fps=14, size=(1800, 1280), ss=2):
             ff = imageio_ffmpeg.get_ffmpeg_exe()
         except Exception:
             ff = None
-    writer = None
-    if ff:
-        writer = subprocess.Popen([ff, '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
-                                   '-s', '%dx%d' % size, '-r', str(fps), '-i', '-',
-                                   '-an', '-vcodec', 'libx264', '-pix_fmt', 'yuv420p',
-                                   '-crf', '20', os.path.join(outdir, 'hook-steps.mp4')],
-                                  stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.DEVNULL)
-    frames = []
-    n = 0
-    for i in range(1, 13):
-        arcs = [x for x in E if x['step'] == i and x['kind'] == 'A' and x['cat'] != 'aux']
-        ids = [id(x) for x in arcs]
-        seq = []
-        for _ in range(3): seq.append((-1, 0.0))
-        for k in range(len(ids)):
-            for s in range(14): seq.append((k, (s+1)/14.0))
-            seq.append((k, 1.0))
-        for _ in range(8): seq.append((len(ids)-1 if ids else -1, 1.0))
+    if not ff:
+        print('no ffmpeg, skip video'); return
+    tmp = os.path.join(outdir, '_video.mp4')
+    vw = subprocess.Popen([ff, '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+                           '-s', '%dx%d' % SIZE, '-r', str(FPS), '-i', '-',
+                           '-an', '-vcodec', 'libx264', '-pix_fmt', 'yuv420p',
+                           '-crf', '20', '-preset', 'medium', tmp],
+                          stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    events = []
+    clock = 0.0
+    gif_frames = []
+    total = 0
+    for i in range(1, 11):
+        items = items_for(i)
+        skip = set(id(e) for e in items)
+        base = make_base(i, skip)
+        seq = frames_for(i, items)
+        events.append(('tick', clock, 0.12))
         for idx, t in seq:
-            p = os.path.join(outdir, '_f.png')
-            im = frame(i, ids, idx, t, p, size=size, ss=ss)
-            if writer:
-                writer.stdin.write(im.convert('RGB').tobytes())
-            if n % 3 == 0 and len(frames) < 140:
-                frames.append(im.convert('RGB').resize((size[0]//2, size[1]//2)))
-            n += 1
-    if writer:
-        writer.stdin.close(); writer.wait()
-    # GIF
-    if frames:
-        frames[0].save(os.path.join(outdir, 'hook-steps.gif'), save_all=True,
-                       append_images=frames[1:], duration=int(1000/fps*3), loop=0,
-                       optimize=True)
-    print('frames', n)
+            cv = base
+            cv.img = base.img.copy()
+            cv.d = ImageDraw.Draw(cv.img)
+            if 0 <= idx < len(items):
+                e = items[idx]
+                col = CAT['final'] if e['cat'] == 'final' else CAT[e['cat']]
+                lw = LW[e['cat']] * 1.25
+                if e['kind'] == 'A':
+                    draw_sweep(cv, e, t, col, lw)
+                else:
+                    draw_line_sweep(cv, e, t, col, lw)
+            out = cv.img.resize(SIZE, Image.LANCZOS)
+            vw.stdin.write(out.convert('RGB').tobytes())
+            if do_gif and total % 6 == 0:
+                gif_frames.append(out.convert('RGB').resize((720, 512)))
+            total += 1
+            clock += 1.0/FPS
+        # 本步扫掠音效
+        dur_sweep = len(seq)/FPS
+        events.append(('scratch', clock-dur_sweep, max(0.2, dur_sweep*0.9)))
+    events.append(('ding', clock-0.2, 0.9))
+    for _ in range(int(FPS*1.2)):
+        vw.stdin.write(base.img.resize(SIZE, Image.LANCZOS).convert('RGB').tobytes())
+        total += 1
+    vw.stdin.close(); vw.wait()
+    wav = os.path.join(outdir, '_audio.wav')
+    build_audio(events, clock+1.2, wav)
+    final = os.path.join(outdir, 'hook-steps.mp4')
+    subprocess.run([ff, '-y', '-i', tmp, '-i', wav, '-c:v', 'copy', '-c:a', 'aac',
+                    '-b:a', '128k', '-shortest', final],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    os.remove(tmp); os.remove(wav)
+    if do_gif and gif_frames:
+        gif_frames[0].save(os.path.join(outdir, 'hook-steps.gif'), save_all=True,
+                           append_images=gif_frames[1:], duration=100, loop=0, optimize=True)
+    print('frames', total, 'dur %.1fs' % (total/FPS))
