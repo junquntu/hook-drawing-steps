@@ -86,7 +86,7 @@ def build(outdir, fps=14, size=(1800, 1280), ss=2):
             im = frame(i, ids, idx, t, p, size=size, ss=ss)
             if writer:
                 writer.stdin.write(im.convert('RGB').tobytes())
-            if n % 2 == 0 and len(frames) < 200:
+            if n % 3 == 0 and len(frames) < 140:
                 frames.append(im.convert('RGB').resize((size[0]//2, size[1]//2)))
             n += 1
     if writer:
@@ -94,6 +94,6 @@ def build(outdir, fps=14, size=(1800, 1280), ss=2):
     # GIF
     if frames:
         frames[0].save(os.path.join(outdir, 'hook-steps.gif'), save_all=True,
-                       append_images=frames[1:], duration=int(1000/fps*2), loop=0,
+                       append_images=frames[1:], duration=int(1000/fps*3), loop=0,
                        optimize=True)
     print('frames', n)

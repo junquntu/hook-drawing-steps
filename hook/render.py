@@ -156,13 +156,16 @@ def draw_header(cv,i,meta):
     cv.text_px(1752,64,'制图：DeepSeek XH',11.5,(150,158,170),anchor='ra')
     cv.text_px(1752,80,'来自 414',11.5,(150,158,170),anchor='ra')
 
+NOSTART = '。，、；：）」』】！？%”’·'
 def wrap(cv,s,size,maxw):
     f=F(FONT_SANS,size*cv.SS); out,line=[],''
     for ch in s:
         if ch=='\n': out.append(line); line=''; continue
         t=line+ch
-        if f.getlength(t)/cv.SS>maxw and line: out.append(line); line=ch
-        else: line=t
+        if f.getlength(t)/cv.SS>maxw and line and ch not in NOSTART:
+            out.append(line); line=ch
+        else:
+            line=t
     if line: out.append(line)
     return out
 
