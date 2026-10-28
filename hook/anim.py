@@ -140,10 +140,13 @@ def draw_item(cv, e, t):
     col = CAT['final'] if e['cat'] == 'final' else CAT[e['cat']]
     lw = LW[e['cat']] * (1.35 if e['cat'] != 'final' else 1.0)
     k = e['kind']
+    live = t < 0.999
     if k == 'A':
-        draw_sweep(cv, e, t, col, lw)
+        if live: draw_sweep(cv, e, t, col, lw)
+        else:    cv.arc(e['c'], e['r'], e['a0'], e['a1'], col, lw, DASH.get(e['cat']))
     elif k == 'L':
-        draw_line_sweep(cv, e, t, col, lw)
+        if live: draw_line_sweep(cv, e, t, col, lw)
+        else:    cv.polyline([e['p1'], e['p2']], col, lw, DASH.get(e['cat']))
     elif k == 'C':
         cv.arc(e['c'], e['r'], 90.0, 90.0 + 360.0*t, col, lw, DASH.get(e['cat']))
         cv.dot(cv.arc_pt(e['c'], e['r'], 90.0 + 360.0*t), 0.5, col)
